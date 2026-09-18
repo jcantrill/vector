@@ -10,7 +10,7 @@ use vector_lib::{
 use super::{request_builder::HecMetricsRequestBuilder, sink::HecMetricsSink};
 use crate::{
     config::{AcknowledgementsConfig, GenerateConfig, Input, SinkConfig, SinkContext},
-    http::HttpClient,
+    http::{HttpClient, HttpConnectionConfig},
     sinks::{
         Healthcheck,
         splunk_hec::common::{
@@ -145,7 +145,11 @@ impl GenerateConfig for HecMetricsSinkConfig {
 #[typetag::serde(name = "splunk_hec_metrics")]
 impl SinkConfig for HecMetricsSinkConfig {
     async fn build(&self, cx: SinkContext) -> crate::Result<(VectorSink, Healthcheck)> {
-        let client = create_client(self.tls.as_ref(), cx.proxy())?;
+        let client = create_client(
+            self.tls.as_ref(),
+            cx.proxy(),
+            &HttpConnectionConfig::default(),
+        )?;
         let healthcheck = build_healthcheck(
             self.endpoint.clone(),
             self.default_token.inner().to_owned(),

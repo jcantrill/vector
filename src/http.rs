@@ -75,6 +75,97 @@ impl HttpError {
 pub type HttpClientFuture = <HttpClient as Service<http::Request<Body>>>::Future;
 type HttpProxyConnector = ProxyConnector<HttpsConnector<HttpConnector>>;
 
+/// Outbound HTTP connection pooling and keepalive settings.
+///
+/// These control how idle keep-alive connections are recycled, which is
+/// important when Vector forwards through a load balancer or proxy that
+/// silently drops idle TCP flows: a stale (half-open) connection that is reused
+/// causes a request to fail or stall. Recycling idle connections before they go
+/// stale avoids this.
+#[configurable_component]
+#[derive(Clone, Debug)]
+#[serde(default)]
+pub struct HttpConnectionConfig {
+    /// Recycle idle keep-alive connections after this many seconds.
+    ///
+    /// Set this below the idle timeout of any load balancer or proxy between
+    /// Vector and the destination so that stale connections are discarded
+    /// before they are reused. Set to `null` to keep idle connections until the
+    /// peer closes them.
+    #[configurable(metadata(docs::type_unit = "seconds"))]
+    pub pool_idle_timeout_secs: Option<u64>,
+
+    /// Maximum number of idle keep-alive connections to retain per host.
+    ///
+    /// Set to `0` to disable connection pooling entirely, opening a new
+    /// connection for every request. Leave unset to retain hyper's default
+    /// (unlimited).
+    pub pool_max_idle_per_host: Option<usize>,
+
+    /// Enable TCP keepalive probes on outbound connections, spaced this many
+    /// seconds apart.
+    ///
+    /// Acts as an OS-level backstop for detecting half-open connections. Set to
+    /// `null` to leave TCP keepalive disabled.
+    #[configurable(metadata(docs::type_unit = "seconds"))]
+    pub tcp_keepalive_secs: Option<u64>,
+
+    /// Interval, in seconds, between HTTP/2 keepalive PING frames.
+    ///
+    /// HTTP/2 multiplexes a single connection, so pool recycling does not detect
+    /// a half-open one; keepalive PINGs do. Set to `null` to disable.
+    #[configurable(metadata(docs::type_unit = "seconds"))]
+    pub http2_keepalive_interval_secs: Option<u64>,
+
+    /// Timeout, in seconds, for an HTTP/2 keepalive PING before the connection
+    /// is considered dead.
+    #[configurable(metadata(docs::type_unit = "seconds"))]
+    pub http2_keepalive_timeout_secs: Option<u64>,
+
+    /// Whether HTTP/2 keepalive PING frames are sent while the connection is
+    /// otherwise idle.
+    pub http2_keepalive_while_idle: bool,
+}
+
+impl Default for HttpConnectionConfig {
+    fn default() -> Self {
+        Self {
+            // Sized to sit under the idle timeout of a typical cloud load
+            // balancer (~60s) so idle connections are recycled before they can
+            // go stale.
+            pool_idle_timeout_secs: Some(45),
+            pool_max_idle_per_host: None,
+            tcp_keepalive_secs: Some(30),
+            http2_keepalive_interval_secs: None,
+            http2_keepalive_timeout_secs: None,
+            http2_keepalive_while_idle: false,
+        }
+    }
+}
+
+impl HttpConnectionConfig {
+    fn apply_to_builder(&self, builder: &mut client::Builder) {
+        builder.pool_idle_timeout(self.pool_idle_timeout_secs.map(Duration::from_secs));
+        if let Some(max_idle) = self.pool_max_idle_per_host {
+            builder.pool_max_idle_per_host(max_idle);
+        }
+        if let Some(interval) = self.http2_keepalive_interval_secs {
+            builder.http2_keep_alive_interval(Duration::from_secs(interval));
+        }
+        if let Some(timeout) = self.http2_keepalive_timeout_secs {
+            builder.http2_keep_alive_timeout(Duration::from_secs(timeout));
+        }
+        builder.http2_keep_alive_while_idle(self.http2_keepalive_while_idle);
+    }
+
+    const fn tcp_keepalive(&self) -> Option<Duration> {
+        match self.tcp_keepalive_secs {
+            Some(secs) => Some(Duration::from_secs(secs)),
+            None => None,
+        }
+    }
+}
+
 pub struct HttpClient<B = Body> {
     client: Client<HttpProxyConnector, B>,
     user_agent: HeaderValue,
@@ -101,6 +192,36 @@ where
     ) -> Result<HttpClient<B>, HttpError> {
         let proxy_connector = build_proxy_connector(tls_settings.into(), proxy_config)?;
         let client = client_builder.build(proxy_connector.clone());
+
+        let app_name = crate::get_app_name();
+        let version = crate::get_version();
+        let user_agent = HeaderValue::from_str(&format!("{app_name}/{version}"))
+            .expect("Invalid header value for user-agent!");
+
+        Ok(HttpClient {
+            client,
+            user_agent,
+            proxy_connector,
+        })
+    }
+
+    /// Build a client that recycles idle connections and applies keepalive
+    /// according to `connection`. Prefer this over [`HttpClient::new`] for sinks
+    /// that forward through a load balancer or proxy.
+    pub fn new_with_connection_config(
+        tls_settings: impl Into<MaybeTlsSettings>,
+        proxy_config: &ProxyConfig,
+        connection: &HttpConnectionConfig,
+    ) -> Result<HttpClient<B>, HttpError> {
+        let mut builder = Client::builder();
+        connection.apply_to_builder(&mut builder);
+
+        let proxy_connector = build_proxy_connector_with_keepalive(
+            tls_settings.into(),
+            proxy_config,
+            connection.tcp_keepalive(),
+        )?;
+        let client = builder.build(proxy_connector.clone());
 
         let app_name = crate::get_app_name();
         let version = crate::get_version();
@@ -176,11 +297,19 @@ pub fn build_proxy_connector(
     tls_settings: MaybeTlsSettings,
     proxy_config: &ProxyConfig,
 ) -> Result<ProxyConnector<HttpsConnector<HttpConnector>>, HttpError> {
+    build_proxy_connector_with_keepalive(tls_settings, proxy_config, None)
+}
+
+pub fn build_proxy_connector_with_keepalive(
+    tls_settings: MaybeTlsSettings,
+    proxy_config: &ProxyConfig,
+    tcp_keepalive: Option<Duration>,
+) -> Result<ProxyConnector<HttpsConnector<HttpConnector>>, HttpError> {
     // Create dedicated TLS connector for the proxied connection with user TLS settings.
     let tls = tls_connector_builder(&tls_settings)
         .context(BuildTlsConnectorSnafu)?
         .build();
-    let https = build_tls_connector(tls_settings)?;
+    let https = build_tls_connector_with_keepalive(tls_settings, tcp_keepalive)?;
     let mut proxy = ProxyConnector::new(https).unwrap();
     // Make proxy connector aware of user TLS settings by setting the TLS connector:
     // https://github.com/vectordotdev/vector/issues/13683
@@ -194,8 +323,16 @@ pub fn build_proxy_connector(
 pub fn build_tls_connector(
     tls_settings: MaybeTlsSettings,
 ) -> Result<HttpsConnector<HttpConnector>, HttpError> {
+    build_tls_connector_with_keepalive(tls_settings, None)
+}
+
+pub fn build_tls_connector_with_keepalive(
+    tls_settings: MaybeTlsSettings,
+    tcp_keepalive: Option<Duration>,
+) -> Result<HttpsConnector<HttpConnector>, HttpError> {
     let mut http = HttpConnector::new();
     http.enforce_http(false);
+    http.set_keepalive(tcp_keepalive);
 
     let tls = tls_connector_builder(&tls_settings).context(BuildTlsConnectorSnafu)?;
     let mut https = HttpsConnector::with_connector(http, tls).context(MakeHttpsConnectorSnafu)?;

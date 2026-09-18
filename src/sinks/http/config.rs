@@ -25,7 +25,7 @@ use crate::aws::AwsAuthentication;
 use crate::sinks::util::http::SigV4Config;
 use crate::{
     codecs::{EncodingConfigWithFraming, SinkType},
-    http::{Auth, HttpClient, MaybeAuth},
+    http::{Auth, HttpClient, HttpConnectionConfig, MaybeAuth},
     sinks::{
         prelude::*,
         util::{
@@ -98,6 +98,10 @@ pub struct HttpSinkConfig {
     pub request: RequestConfig,
 
     #[configurable(derived)]
+    #[serde(default)]
+    pub connection: HttpConnectionConfig,
+
+    #[configurable(derived)]
     pub tls: Option<TlsConfig>,
 
     #[configurable(derived)]
@@ -163,7 +167,11 @@ impl From<HttpMethod> for Method {
 impl HttpSinkConfig {
     fn build_http_client(&self, cx: &SinkContext) -> crate::Result<HttpClient> {
         let tls = TlsSettings::from_options(self.tls.as_ref())?;
-        Ok(HttpClient::new(tls, cx.proxy())?)
+        Ok(HttpClient::new_with_connection_config(
+            tls,
+            cx.proxy(),
+            &self.connection,
+        )?)
     }
 
     pub(super) fn build_encoder(&self) -> crate::Result<Encoder<Framer>> {
@@ -411,6 +419,7 @@ mod tests {
                 compression: Compression::default(),
                 batch: BatchConfig::default(),
                 request: RequestConfig::default(),
+                connection: Default::default(),
                 tls: None,
                 acknowledgements: AcknowledgementsConfig::default(),
                 payload_prefix: String::new(),

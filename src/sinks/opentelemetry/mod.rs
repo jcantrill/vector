@@ -55,6 +55,7 @@ impl Default for Protocol {
             payload_suffix: Default::default(),
             batch: Default::default(),
             request: Default::default(),
+            connection: Default::default(),
             tls: Default::default(),
             acknowledgements: Default::default(),
         })

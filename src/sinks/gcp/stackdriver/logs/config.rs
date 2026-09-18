@@ -14,7 +14,7 @@ use super::{
 };
 use crate::{
     gcp::{GcpAuthConfig, GcpAuthenticator, scopes},
-    http::HttpClient,
+    http::{HttpClient, HttpConnectionConfig},
     schema,
     sinks::{
         gcs_common::config::healthcheck_response,
@@ -95,6 +95,10 @@ pub(super) struct StackdriverConfig {
     #[configurable(derived)]
     #[serde(default)]
     pub(super) request: TowerRequestConfig<StackdriverTowerRequestConfigDefaults>,
+
+    #[configurable(derived)]
+    #[serde(default)]
+    pub(super) connection: HttpConnectionConfig,
 
     #[configurable(derived)]
     pub(super) tls: Option<TlsConfig>,
@@ -258,7 +262,11 @@ impl SinkConfig for StackdriverConfig {
         let request_limits = self.request.into_settings();
 
         let tls_settings = TlsSettings::from_options(self.tls.as_ref())?;
-        let client = HttpClient::new(tls_settings, cx.proxy())?;
+        let client = HttpClient::new_with_connection_config(
+            tls_settings,
+            cx.proxy(),
+            &self.connection,
+        )?;
 
         let uri: Uri = self.endpoint.parse()?;
 

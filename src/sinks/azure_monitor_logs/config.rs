@@ -13,7 +13,7 @@ use super::{
     sink::AzureMonitorLogsSink,
 };
 use crate::{
-    http::{HttpClient, get_http_scheme_from_uri},
+    http::{HttpClient, HttpConnectionConfig, get_http_scheme_from_uri},
     sinks::{
         prelude::*,
         util::{RealtimeSizeBasedDefaultBatchSettings, UriSerde, http::HttpStatusRetryLogic},
@@ -92,6 +92,10 @@ pub struct AzureMonitorLogsConfig {
     #[serde(default)]
     pub request: TowerRequestConfig,
 
+    #[configurable(derived)]
+    #[serde(default)]
+    pub connection: HttpConnectionConfig,
+
     /// Use this option to customize the log field used as [`TimeGenerated`][1] in Azure.
     ///
     /// The setting of `log_schema.timestamp_key`, usually `timestamp`, is used here by default.
@@ -126,6 +130,7 @@ impl Default for AzureMonitorLogsConfig {
             encoding: Default::default(),
             batch: Default::default(),
             request: Default::default(),
+            connection: HttpConnectionConfig::default(),
             time_generated_key: None,
             tls: None,
             acknowledgements: Default::default(),
@@ -168,7 +173,11 @@ impl AzureMonitorLogsConfig {
         let time_generated_key = self.get_time_generated_key();
 
         let tls_settings = TlsSettings::from_options(self.tls.as_ref())?;
-        let client = HttpClient::new(Some(tls_settings), &cx.proxy)?;
+        let client = HttpClient::new_with_connection_config(
+            Some(tls_settings),
+            &cx.proxy,
+            &self.connection,
+        )?;
 
         let service = AzureMonitorLogsService::new(
             client,

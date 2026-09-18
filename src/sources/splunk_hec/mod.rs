@@ -1411,6 +1411,7 @@ mod tests {
             compression,
             batch: BatchConfig::default(),
             request: TowerRequestConfig::default(),
+            connection: Default::default(),
             tls: None,
             acknowledgements: Default::default(),
             timestamp_nanos_key: None,

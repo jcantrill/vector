@@ -6,7 +6,7 @@ use vector_lib::{configurable::configurable_component, schema};
 use vrl::value::Kind;
 
 use crate::{
-    http::{HttpClient, get_http_scheme_from_uri},
+    http::{HttpClient, HttpConnectionConfig, get_http_scheme_from_uri},
     sinks::{
         azure_common::config::AzureAuthentication,
         prelude::*,
@@ -93,6 +93,10 @@ pub struct AzureLogsIngestionConfig {
     pub request: TowerRequestConfig,
 
     #[configurable(derived)]
+    #[serde(default)]
+    pub connection: HttpConnectionConfig,
+
+    #[configurable(derived)]
     pub tls: Option<TlsConfig>,
 
     #[configurable(derived)]
@@ -116,6 +120,7 @@ impl Default for AzureLogsIngestionConfig {
             encoding: Default::default(),
             batch: Default::default(),
             request: Default::default(),
+            connection: HttpConnectionConfig::default(),
             tls: None,
             acknowledgements: Default::default(),
         }
@@ -144,7 +149,11 @@ impl AzureLogsIngestionConfig {
             .into_batcher_settings()?;
 
         let tls_settings = TlsSettings::from_options(self.tls.as_ref())?;
-        let client = HttpClient::new(Some(tls_settings), &cx.proxy)?;
+        let client = HttpClient::new_with_connection_config(
+            Some(tls_settings),
+            &cx.proxy,
+            &self.connection,
+        )?;
 
         let service = AzureLogsIngestionService::new(
             client,

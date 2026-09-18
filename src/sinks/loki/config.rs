@@ -4,7 +4,7 @@ use vrl::value::Kind;
 
 use super::{healthcheck::healthcheck, sink::LokiSink};
 use crate::{
-    http::{Auth, HttpClient, MaybeAuth},
+    http::{Auth, HttpClient, HttpConnectionConfig, MaybeAuth},
     schema,
     sinks::{prelude::*, util::UriSerde},
 };
@@ -110,6 +110,10 @@ pub struct LokiConfig {
     pub batch: BatchConfig<LokiDefaultBatchSettings>,
 
     #[configurable(derived)]
+    #[serde(default)]
+    pub connection: HttpConnectionConfig,
+
+    #[configurable(derived)]
     pub tls: Option<TlsConfig>,
 
     #[configurable(derived)]
@@ -204,7 +208,7 @@ impl GenerateConfig for LokiConfig {
 impl LokiConfig {
     pub(super) fn build_client(&self, cx: SinkContext) -> crate::Result<HttpClient> {
         let tls = TlsSettings::from_options(self.tls.as_ref())?;
-        let client = HttpClient::new(tls, cx.proxy())?;
+        let client = HttpClient::new_with_connection_config(tls, cx.proxy(), &self.connection)?;
         Ok(client)
     }
 }

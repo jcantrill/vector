@@ -203,6 +203,7 @@ impl HumioLogsConfig {
             compression: self.compression,
             batch: self.batch,
             request: self.request,
+            connection: Default::default(),
             tls: self.tls.clone(),
             acknowledgements: HecClientAcknowledgementsConfig {
                 indexer_acknowledgements_enabled: false,

@@ -127,6 +127,7 @@ async fn config(
         compression: Compression::None,
         batch,
         request: TowerRequestConfig::default(),
+        connection: Default::default(),
         tls: None,
         acknowledgements: Default::default(),
         timestamp_nanos_key: None,

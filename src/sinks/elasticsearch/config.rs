@@ -15,7 +15,7 @@ use crate::{
     codecs::Transformer,
     config::{AcknowledgementsConfig, DataType, Input, SinkConfig, SinkContext},
     event::{EventRef, LogEvent, Value},
-    http::{HttpClient, QueryParameters},
+    http::{HttpClient, HttpConnectionConfig, QueryParameters},
     internal_events::TemplateRenderingError,
     sinks::{
         Healthcheck, VectorSink,
@@ -171,6 +171,10 @@ pub struct ElasticsearchConfig {
     pub request: RequestConfig,
 
     #[configurable(derived)]
+    #[serde(default)]
+    pub connection: HttpConnectionConfig,
+
+    #[configurable(derived)]
     pub auth: Option<ElasticsearchAuthConfig>,
 
     /// Custom parameters to add to the query string for each HTTP request sent to Elasticsearch.
@@ -247,6 +251,7 @@ impl Default for ElasticsearchConfig {
             encoding: Default::default(),
             batch: Default::default(),
             request: Default::default(),
+            connection: Default::default(),
             auth: None,
             query: None,
             #[cfg(feature = "aws-core")]
@@ -544,7 +549,11 @@ impl SinkConfig for ElasticsearchConfig {
         let commons = ElasticsearchCommon::parse_many(self, cx.proxy()).await?;
         let common = commons[0].clone();
 
-        let client = HttpClient::new(common.tls_settings.clone(), cx.proxy())?;
+        let client = HttpClient::new_with_connection_config(
+            common.tls_settings.clone(),
+            cx.proxy(),
+            &self.connection,
+        )?;
 
         let request_limits = self.request.tower.into_settings();
 

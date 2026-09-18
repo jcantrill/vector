@@ -11,7 +11,10 @@ use super::{
     request_builder::ElasticsearchRequestBuilder,
 };
 use crate::{
-    http::{HttpClient, MaybeAuth, ParameterValue, QueryParameterValue, QueryParameters},
+    http::{
+        HttpClient, HttpConnectionConfig, MaybeAuth, ParameterValue, QueryParameterValue,
+        QueryParameters,
+    },
     sinks::{
         HealthcheckError,
         elasticsearch::{
@@ -160,6 +163,7 @@ impl ElasticsearchCommon {
                         &request,
                         &tls_settings,
                         proxy_config,
+                        &config.connection,
                     )
                     .await
                     {
@@ -378,6 +382,7 @@ async fn get_version(
     request: &RequestConfig,
     tls_settings: &TlsSettings,
     proxy_config: &ProxyConfig,
+    connection: &HttpConnectionConfig,
 ) -> crate::Result<usize> {
     #[derive(Deserialize)]
     struct Version {
@@ -388,7 +393,11 @@ async fn get_version(
         version: Option<Version>,
     }
 
-    let client = HttpClient::new(tls_settings.clone(), proxy_config)?;
+    let client = HttpClient::new_with_connection_config(
+        tls_settings.clone(),
+        proxy_config,
+        connection,
+    )?;
     let response = get(
         base_url,
         auth,

@@ -170,6 +170,7 @@ impl SinkConfig for AxiomConfig {
             request,
             acknowledgements: self.acknowledgements,
             batch: self.batch,
+            connection: Default::default(),
             headers: None,
             encoding: EncodingConfigWithFraming::new(
                 Some(FramingConfig::NewlineDelimited),

@@ -8,7 +8,7 @@ use vector_lib::{
 
 use super::{encoder::HecLogsEncoder, request_builder::HecLogsRequestBuilder, sink::HecLogsSink};
 use crate::{
-    http::HttpClient,
+    http::{HttpClient, HttpConnectionConfig},
     sinks::{
         prelude::*,
         splunk_hec::common::{
@@ -111,6 +111,10 @@ pub struct HecLogsSinkConfig {
     pub request: TowerRequestConfig,
 
     #[configurable(derived)]
+    #[serde(default)]
+    pub connection: HttpConnectionConfig,
+
+    #[configurable(derived)]
     pub tls: Option<TlsConfig>,
 
     #[configurable(derived)]
@@ -171,6 +175,7 @@ impl GenerateConfig for HecLogsSinkConfig {
             compression: Compression::default(),
             batch: BatchConfig::default(),
             request: TowerRequestConfig::default(),
+            connection: HttpConnectionConfig::default(),
             tls: None,
             acknowledgements: Default::default(),
             timestamp_nanos_key: None,
@@ -190,7 +195,7 @@ impl SinkConfig for HecLogsSinkConfig {
             return Err("`auto_extract_timestamp` cannot be set for the `raw` endpoint.".into());
         }
 
-        let client = create_client(self.tls.as_ref(), cx.proxy())?;
+        let client = create_client(self.tls.as_ref(), cx.proxy(), &self.connection)?;
         let healthcheck = build_healthcheck(
             self.endpoint.clone(),
             self.default_token.inner().to_owned(),
