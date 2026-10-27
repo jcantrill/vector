@@ -414,7 +414,12 @@ mod test {
             stderr_full.into(),
             stdout_full.into(),
         ]);
-        let output_stream = merge_partial_events(input_stream, LogNamespace::Legacy, None);
+        let output_stream = merge_partial_events(
+            input_stream,
+            LogNamespace::Legacy,
+            None,
+            OversizedAction::Drop,
+        );
 
         let output: Vec<Event> = output_stream.collect().await;
         assert_eq!(output.len(), 2);
